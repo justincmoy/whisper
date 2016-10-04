@@ -1,11 +1,14 @@
 #!/usr/bin/env python
 
+import json
 import os
 import mmap
 import struct
 import signal
 import sys
 import optparse
+
+from collections import OrderedDict
 
 try:
   import whisper
@@ -19,6 +22,8 @@ if sys.version_info >= (3, 0):
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 option_parser = optparse.OptionParser(usage='''%prog path''')
+option_parser.add_option('--json', default=False, action='store_true',
+  help="Output results in JSON form")
 (options, args) = option_parser.parse_args()
 
 if len(args) != 1:
@@ -84,19 +89,36 @@ def dump_archive_headers(archives):
     print("")
 
 def dump_archives(archives):
-  for i,archive in enumerate(archives):
-    print('Archive %d data:' %i)
+  dumped_archives = []
+  for archive in archives:
+    this_archive = OrderedDict()
     offset = archive['offset']
     for point in xrange(archive['points']):
       (timestamp, value) = struct.unpack(whisper.pointFormat, map[offset:offset+whisper.pointSize])
-      print('%d: %d, %10.35g' % (point, timestamp, value))
+      this_archive[point] = (timestamp, value)
       offset += whisper.pointSize
-    print
+    dumped_archives.append(this_archive)
+  return dumped_archives
 
 if not os.path.exists(path):
   raise SystemExit('[ERROR] File "%s" does not exist!' % path)
 
 map = mmap_file(path)
 header = read_header(map)
-dump_header(header)
-dump_archives(header['archives'])
+
+archives = dump_archives(header['archives'])
+if not options.json:
+  dump_header(header)
+
+  for i, archive in enumerate(archives):
+    print('Archive %d data:' %i)
+    for point, values in archive.items():
+        print('%d: %d, %10.35g' % (point, values[0], values[1]))
+
+  exit(0)
+
+output = {
+  'headers': header,
+  'archives': archives
+}
+print json.dumps(output)
